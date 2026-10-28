@@ -415,10 +415,10 @@ function notify(t){toast(t)}
 var pushT=null,pushing=false,dirty=false,errShown=false;
 function writeErr(e){
   var c=e&&e.code;
-  toast(c==='quota_exceeded'?'Se llenó el espacio de la app. Borra mensajes o premios antiguos.':
-    c==='permission-denied'?'Firebase rechazó el guardado. Publica las reglas Firestore incluidas en este ZIP y confirma que entraste como padre/madre.':
-    c==='invalid_argument'?'Hay un dato no válido. Revisa el formulario e inténtalo de nuevo.':
-    'No se pudo guardar en la nube. Revisa tu conexión y la configuración de Firebase.');
+  if(c==='quota_exceeded')toast('Se llenó el espacio de la app. Borra mensajes o premios antiguos.');
+  else if(c==='permission-denied')toast('Firebase bloqueó el guardado por permisos. Verifica que las reglas estén publicadas y que hayas iniciado sesión como padre/madre.');
+  else if(c==='invalid_argument')toast('El nombre no es válido. Usa entre 1 y 40 caracteres.');
+  else toast('No se pudo guardar en la nube. Revisa la conexión. Código: '+(c||'desconocido'));
 }
 function schedulePush(){
   if(SAMPLE||!DB||!mySid||MODE!=='student')return;
@@ -842,8 +842,11 @@ function assignedTaskRow(t){
 }
 var DEFAULT_ACTIVITY_TYPES=['Tarea','Examen','Proyecto','Lectura','Exposición','Repaso','Actividad'];
 function activityTypeNames(){
-  var names=DEFAULT_ACTIVITY_TYPES.slice();
-  activityTypes.forEach(function(t){if(t.name&&names.indexOf(t.name)<0)names.push(t.name)});
+  var names=[],seen={};
+  DEFAULT_ACTIVITY_TYPES.concat(activityTypes.map(function(t){return t.name||''})).forEach(function(raw){
+    var n=String(raw||'').trim().replace(/\s+/g,' '),k=n.toLocaleLowerCase();
+    if(n&&!seen[k]){seen[k]=true;names.push(n)}
+  });
   return names;
 }
 function activityTypeOptions(selected){

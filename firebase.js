@@ -16,7 +16,7 @@ if(!cfg.apiKey||/PEGA|TU_/.test(cfg.apiKey)){
   const callAI=httpsCallable(fn,'ai',{timeout:130000});
 
   const wrapDoc=d=>({id:d.id,exists:d.exists(),data:()=>d.data(),metadata:d.metadata});
-  const dbErr=e=>({code:e&&e.code==='permission-denied'?'invalid_argument':e&&e.code==='resource-exhausted'?'quota_exceeded':'unavailable',message:String(e&&e.message||e)});
+  const dbErr=e=>({code:e&&e.code==='permission-denied'?'permission-denied':e&&e.code==='resource-exhausted'?'quota_exceeded':e&&e.code==='invalid-argument'?'invalid_argument':'unavailable',message:String(e&&e.message||e)});
 
   /* Misma interfaz pequeña que usa la app, limitada a la familia */
   function scoped(fid){
