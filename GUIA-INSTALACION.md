@@ -143,3 +143,18 @@ Después de actualizar el repositorio de GitHub, publica también las nuevas reg
 - Al asignar una actividad, usa **＋ Agregar** en **Recordatorios personalizados** para agregar varias fechas y horas. Cada recordatorio debe estar en el futuro y antes del día de entrega. Las fechas se muestran en la tarjeta de actividad del estudiante y de la familia.
 - Para recibir avisos, el estudiante debe permitir notificaciones en el dispositivo. Los recordatorios personalizados se comprueban mientras la aplicación está abierta o activa; el navegador no garantiza avisos con la PWA cerrada.
 - Esta versión añade la colección `activityTypes` bajo cada documento `families/{familyId}`. Después de subir la app, publica las reglas actualizadas con `firebase deploy --only firestore:rules`. Las reglas permiten leer los tipos a miembros de la familia y solo al padre/madre crearlos, editarlos o eliminarlos.
+
+
+## Corrección de tipos de actividad y recordatorios múltiples
+
+Esta revisión incorpora un administrador visible de tipos de actividad en **Padre → Actividad**, con el botón **Registrar tipo**, y muestra el selector actualizado al crear tareas desde la cuenta estudiante. Los tipos personalizados se guardan en `families/{familyId}/activityTypes` y son compartidos por los miembros de esa familia.
+
+Al asignar una actividad, el formulario muestra de inmediato un primer campo de recordatorio `fecha + hora`; usa **＋ Agregar** para incorporar más. Los recordatorios deben ser futuros y anteriores a la fecha de entrega. En la cuenta del estudiante se muestran junto a la actividad. Para recibir avisos, el estudiante debe permitir las notificaciones del navegador y abrir StudyFlow; los avisos no se garantizan si el navegador/app está completamente cerrado.
+
+### Actualización recomendada
+1. Conserva tu archivo `app/firebase-config.js` si ya tiene la configuración de tu proyecto.
+2. Sube los archivos `app/index.html` y `app/firebase.js` de esta versión a GitHub.
+3. Publica las reglas desde la carpeta `firebase` de este proyecto con `firebase deploy --only firestore:rules`.
+4. Abre la página publicada en una ventana privada o haz recarga forzada para evitar caché.
+5. Entra como padre, abre **Actividad**, registra un tipo y luego inicia sesión como estudiante para comprobar que aparece en **Nueva actividad → Tipo de actividad**.
+6. Como padre, pulsa **Asignar actividad**: el primer recordatorio debe aparecer sin pulsar agregar; añade otro y guarda. Comprueba que ambos se muestran en la cuenta del estudiante.

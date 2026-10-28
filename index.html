@@ -413,8 +413,9 @@ var pushT=null,pushing=false,dirty=false,errShown=false;
 function writeErr(e){
   var c=e&&e.code;
   toast(c==='quota_exceeded'?'Se llenó el espacio de la app. Borra mensajes o premios antiguos.':
-    c==='invalid_argument'?'No tienes permiso para guardar. Pide que te compartan la app como Editor.':
-    'No se pudo guardar en la nube. Revisa tu conexión.');
+    c==='permission-denied'?'Firebase rechazó el guardado. Publica las reglas Firestore incluidas en este ZIP y confirma que entraste como padre/madre.':
+    c==='invalid_argument'?'Hay un dato no válido. Revisa el formulario e inténtalo de nuevo.':
+    'No se pudo guardar en la nube. Revisa tu conexión y la configuración de Firebase.');
 }
 function schedulePush(){
   if(SAMPLE||!DB||!mySid||MODE!=='student')return;
@@ -843,8 +844,8 @@ function activityTypeOptions(selected){
 }
 function parentActivityTypesCard(){
   if(MODE!=='parent')return '';
-  var out='<div class="card"><div class="row between wrap"><div><h2 style="margin:0">🗂️ Tipos de actividades</h2><div class="muted">Administra las opciones que aparecen en los formularios de los estudiantes.</div></div><button class="btn famb small" data-act="activity-type-add">＋ Agregar tipo</button></div>';
-  if(!activityTypes.length)out+='<div class="empty">Aún no hay tipos personalizados. Puedes agregar, por ejemplo, Laboratorio, Investigación o Guía de trabajo.</div>';
+  var out='<div class="card" id="activity-type-manager"><div class="row between wrap"><div><h2 style="margin:0">🗂️ Tipos de actividades <span class="badge">'+activityTypes.length+' personalizados</span></h2><div class="muted">Administra aquí la lista que aparece al crear actividades en la cuenta del estudiante.</div></div><button class="btn famb small" data-act="activity-type-add">＋ Registrar tipo</button></div>';
+  if(!activityTypes.length)out+='<div class="empty">No has registrado tipos personalizados. Pulsa <b>Registrar tipo</b> para añadir opciones como Laboratorio, Investigación o Guía de trabajo. Los tipos predeterminados seguirán disponibles.</div>'; 
   activityTypes.forEach(function(t){out+='<div class="item"><span class="dot" style="background:var(--primary)"></span><div class="grow"><div class="title">'+esc(t.name)+'</div><div class="muted">Disponible en las cuentas familiares</div></div><button class="btn ghost small" data-act="activity-type-edit" data-id="'+esc(t.id)+'">Editar</button><button class="btn ghost small" data-act="activity-type-delete" data-id="'+esc(t.id)+'">Eliminar</button></div>'});
   return out+'</div>';
 }
@@ -853,7 +854,7 @@ function formActivityType(id){
   var old=id?activityTypes.filter(function(t){return t.id===id})[0]:null;
   var current=old?old.name:'';
   openModal('<h3>'+(old?'Editar tipo de actividad':'Agregar tipo de actividad')+'</h3><p class="muted">El tipo estará disponible para asignar tareas y también aparecerá en los formularios de los estudiantes.</p><label for="at-name">Nombre del tipo</label><input id="at-name" maxlength="40" value="'+esc(current)+'" placeholder="Ej. Laboratorio, Investigación, Guía de trabajo"><div class="row" style="margin-top:16px"><button class="btn ghost" data-act="close">Cancelar</button><button class="btn famb" id="at-save" style="margin-left:auto">Guardar tipo</button></div>');
-  $('#at-save').onclick=function(){var name=$('#at-name').value.trim().replace(/\s+/g,' ');if(!name){$('#at-name').focus();return}if(name.length>40){toast('Máximo 40 caracteres.');return}var dupe=activityTypeNames().some(function(n){return n.toLocaleLowerCase()===name.toLocaleLowerCase()&&(!old||n!==old.name)});if(dupe){toast('Ese tipo ya existe en la lista.');return}var payload={name:name,active:true,createdBy:AUTH.user.uid,updatedAt:Date.now()};var promise=old?DB.doc('activityTypes/'+old.id).update(payload):DB.collection('activityTypes').add(Object.assign(payload,{createdAt:Date.now()}));promise.then(function(){closeModal();toast(old?'Tipo actualizado ✓':'Tipo agregado ✓')},writeErr)};
+  $('#at-save').onclick=function(){var name=$('#at-name').value.trim().replace(/\s+/g,' ');if(!name){$('#at-name').focus();return}if(name.length>40){toast('Máximo 40 caracteres.');return}var dupe=activityTypeNames().some(function(n){return n.toLocaleLowerCase()===name.toLocaleLowerCase()&&(!old||n.toLocaleLowerCase()!==old.name.toLocaleLowerCase())});if(dupe){toast('Ese tipo ya existe en la lista.');return}if(!AUTH.user||!AUTH.user.uid){toast('La sesión terminó. Vuelve a iniciar sesión.');return}var btn=$('#at-save');btn.disabled=true;btn.textContent='Guardando…';var payload={name:name,active:true,createdBy:AUTH.user.uid,updatedAt:Date.now()};var promise=old?DB.doc('activityTypes/'+old.id).update(payload):DB.collection('activityTypes').add(Object.assign(payload,{createdAt:Date.now()}));promise.then(function(){closeModal();toast(old?'Tipo actualizado ✓':'Tipo registrado ✓')},function(e){btn.disabled=false;btn.textContent='Guardar tipo';writeErr(e)})};
 }
 function deleteActivityType(id){
   var t=activityTypes.filter(function(x){return x.id===id})[0];if(!t||MODE!=='parent')return;
@@ -1737,6 +1738,9 @@ function formAssignedTask(){
   var reminderCount=0;
   function addReminder(value){reminderCount++;var wrap=document.createElement('div');wrap.className='item';wrap.style.alignItems='end';wrap.innerHTML='<div class="grow"><label for="af-rem-'+reminderCount+'">Fecha y hora del recordatorio</label><input type="datetime-local" id="af-rem-'+reminderCount+'" class="af-reminder" value="'+esc(value||'')+'"></div><button type="button" class="btn ghost small" aria-label="Quitar recordatorio">Quitar</button>';wrap.querySelector('button').onclick=function(){wrap.remove()};$('#af-reminders').appendChild(wrap)}
   $('#af-add-reminder').onclick=function(){addReminder('')};
+  addReminder('');
+  // Keep reminder inputs clearly constrained to a future time before the due date.
+  $('#af5').addEventListener('change',function(){Array.prototype.forEach.call(document.querySelectorAll('.af-reminder'),function(inp){inp.max=this.value?this.value+'T00:00':''}.bind(this))});
   $('#afok').onclick=function(){var title=$('#af1').value.trim(),due=$('#af5').value;if(!title){$('#af1').focus();return}if(!due){$('#af5').focus();return}if(!DB||CLOUD!=='on'){toast('Se necesita conexión con Firebase.');return}var dueDate=new Date(due+'T00:00:00');var reminders=[];var invalid=false;Array.prototype.forEach.call(document.querySelectorAll('.af-reminder'),function(inp){if(!inp.value)return;var at=new Date(inp.value);if(isNaN(at.getTime())){invalid=true;return}if(at<=new Date()){invalid=true;toast('Cada recordatorio debe tener una fecha y hora futura, anterior a la entrega.');return}if(at>=dueDate){invalid=true;toast('Cada recordatorio debe ser anterior a la fecha de entrega.');return}reminders.push({at:at.toISOString(),label:at.toLocaleString(LOC,{dateStyle:'medium',timeStyle:'short'}),sent:false})});if(invalid)return;reminders.sort(function(a,b){return a.at.localeCompare(b.at)});var obj={title:title,subject:$('#af2').value.trim(),subjectName:$('#af2').value.trim(),type:$('#af3').value,prio:$('#af4').value,due:due,note:$('#af6').value.trim(),reminders:reminders,student:curSid,done:false,createdBy:AUTH.user.uid,createdAt:Date.now(),updatedAt:Date.now()};DB.collection('assignedTasks').add(obj).then(function(){closeModal();toast('Actividad asignada y sincronizada ✓');},writeErr)};
 }
 function checkAssignedReminders(){
