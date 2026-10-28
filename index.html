@@ -336,7 +336,7 @@ var MODE='';        // 'student' | 'parent' | ''
 var mySid=lsGet('sf.sid')||'';        // perfil de estudiante de este dispositivo
 var curSid=lsGet('sf.cur')||'';       // estudiante que ve el padre
 var DB=null,SAMPLER=null,CLOUD='pending',IMG=null;
-var students={},notes=[],rewards=[],assignedTasks=[],config=null,planDoc=null;
+var students={},notes=[],rewards=[],assignedTasks=[],activityTypes=[],config=null,planDoc=null;
 var SAMPLE=false,demo=null;
 function cacheKey(){return mySid?'sf.cache.'+mySid:LKEY}
 function loadLocal(){return normalize(lsJSON(cacheKey()))}
@@ -468,7 +468,7 @@ function initCloud(){
     SAMPLER=langWrap(api.sampler);IMG={maxCount:1,mediaTypes:['image/jpeg','image/png','image/webp']};
     api.onAuth(function(u){
       unsubAll();stopTimer();AUTH.user=u;AUTH.fam=null;
-      if(!u){AUTH.st='out';AUTH.tab='in';AUTH.err='';AUTH.prof=null;CLOUD='off';DB=null;MODE='';students={};notes=[];rewards=[];assignedTasks=[];config=null;planDoc=null;softRender();return}
+      if(!u){AUTH.st='out';AUTH.tab='in';AUTH.err='';AUTH.prof=null;CLOUD='off';DB=null;MODE='';students={};notes=[];rewards=[];assignedTasks=[];activityTypes=[];config=null;planDoc=null;softRender();return}
       AUTH.st='loading';softRender();
       api.profile(u.uid).then(function(p){
         AUTH.prof=p;
@@ -492,6 +492,7 @@ function enterFamily(p){
     onStudentsSnap();
   },cloudErr));
   unsubs.push(DB.collection('assignedTasks').onSnapshot(function(s){assignedTasks=s.docs.map(function(d){return Object.assign({id:d.id},d.data(),{assignedTask:true})});softRender();checkAssignedReminders()},cloudErr));
+  unsubs.push(DB.collection('activityTypes').onSnapshot(function(s){activityTypes=s.docs.map(function(d){return Object.assign({id:d.id},d.data())}).filter(function(x){return x.active!==false}).sort(function(a,b){return (a.name||'').localeCompare(b.name||'')});softRender()},cloudErr));
   unsubs.push(DB.collection('notes').onSnapshot(function(s){notes=s.docs.map(function(d){return Object.assign({id:d.id},d.data())});checkRewards();softRender()},cloudErr));
   unsubs.push(DB.collection('rewards').onSnapshot(function(s){rewards=s.docs.map(function(d){return Object.assign({id:d.id},d.data())});checkRewards();softRender()},cloudErr));
   unsubs.push(DB.doc('family/config').onSnapshot(function(d){config=d.exists?d.data():null},cloudErr));
@@ -827,7 +828,38 @@ function assignedTaskRow(t){
   if(!t.done){if(dd<0)badge='<span class="badge late">Vencida · '+Math.abs(dd)+' d</span>';else if(dd===0)badge='<span class="badge soon">Entrega hoy</span>';else if(dd===1)badge='<span class="badge soon">1 día</span>';else badge='<span class="badge">'+dd+' días · '+esc(fmtDate(t.due))+'</span>'}
   var prio=t.prio==='alta'?'🔴 Alta':t.prio==='baja'?'🟢 Baja':'🟡 Media';
   var toggle=MODE==='student'?'<input type="checkbox" class="chk" data-act="assigned-toggle" data-id="'+esc(t.id)+'" '+(t.done?'checked':'')+' aria-label="Actividad completada">':'<span class="badge">'+esc((students[t.student]&&students[t.student].name)||'Estudiante')+'</span>';
-  return '<div class="item '+(t.done?'done':'')+'">'+toggle+'<div class="grow"><div class="title">'+esc(t.title)+'</div><div class="muted">'+esc(t.subjectName||t.subject||'Actividad')+' · '+esc(t.type||'Tarea')+' · '+prio+'</div>'+(t.note?'<div class="muted" style="margin-top:3px">'+esc(t.note)+'</div>':'')+'</div>'+badge+'</div>';
+  var remText=(t.reminders||[]).filter(function(r){return r&&r.at}).map(function(r){var d=new Date(r.at);return isNaN(d.getTime())?'':d.toLocaleString(LOC,{dateStyle:'short',timeStyle:'short'})}).filter(Boolean);
+  return '<div class="item '+(t.done?'done':'')+'">'+toggle+'<div class="grow"><div class="title">'+esc(t.title)+'</div><div class="muted">'+esc(t.subjectName||t.subject||'Actividad')+' · '+esc(t.type||'Tarea')+' · '+prio+'</div>'+(t.note?'<div class="muted" style="margin-top:3px">'+esc(t.note)+'</div>':'')+(remText.length?'<div class="muted" style="margin-top:4px">🔔 Recordatorios: '+remText.map(esc).join(' · ')+'</div>':'')+'</div>'+badge+'</div>';
+}
+var DEFAULT_ACTIVITY_TYPES=['Tarea','Examen','Proyecto','Lectura','Exposición','Repaso','Actividad'];
+function activityTypeNames(){
+  var names=DEFAULT_ACTIVITY_TYPES.slice();
+  activityTypes.forEach(function(t){if(t.name&&names.indexOf(t.name)<0)names.push(t.name)});
+  return names;
+}
+function activityTypeOptions(selected){
+  var names=activityTypeNames();if(selected&&names.indexOf(selected)<0)names.push(selected);
+  return names.map(function(n){return '<option value="'+esc(n)+'"'+(n===selected?' selected':'')+'>'+esc(n)+'</option>'}).join('');
+}
+function parentActivityTypesCard(){
+  if(MODE!=='parent')return '';
+  var out='<div class="card"><div class="row between wrap"><div><h2 style="margin:0">🗂️ Tipos de actividades</h2><div class="muted">Administra las opciones que aparecen en los formularios de los estudiantes.</div></div><button class="btn famb small" data-act="activity-type-add">＋ Agregar tipo</button></div>';
+  if(!activityTypes.length)out+='<div class="empty">Aún no hay tipos personalizados. Puedes agregar, por ejemplo, Laboratorio, Investigación o Guía de trabajo.</div>';
+  activityTypes.forEach(function(t){out+='<div class="item"><span class="dot" style="background:var(--primary)"></span><div class="grow"><div class="title">'+esc(t.name)+'</div><div class="muted">Disponible en las cuentas familiares</div></div><button class="btn ghost small" data-act="activity-type-edit" data-id="'+esc(t.id)+'">Editar</button><button class="btn ghost small" data-act="activity-type-delete" data-id="'+esc(t.id)+'">Eliminar</button></div>'});
+  return out+'</div>';
+}
+function formActivityType(id){
+  if(MODE!=='parent'||!DB||CLOUD!=='on'){toast('Solo el padre o madre puede administrar los tipos.');return}
+  var old=id?activityTypes.filter(function(t){return t.id===id})[0]:null;
+  var current=old?old.name:'';
+  openModal('<h3>'+(old?'Editar tipo de actividad':'Agregar tipo de actividad')+'</h3><p class="muted">El tipo estará disponible para asignar tareas y también aparecerá en los formularios de los estudiantes.</p><label for="at-name">Nombre del tipo</label><input id="at-name" maxlength="40" value="'+esc(current)+'" placeholder="Ej. Laboratorio, Investigación, Guía de trabajo"><div class="row" style="margin-top:16px"><button class="btn ghost" data-act="close">Cancelar</button><button class="btn famb" id="at-save" style="margin-left:auto">Guardar tipo</button></div>');
+  $('#at-save').onclick=function(){var name=$('#at-name').value.trim().replace(/\s+/g,' ');if(!name){$('#at-name').focus();return}if(name.length>40){toast('Máximo 40 caracteres.');return}var dupe=activityTypeNames().some(function(n){return n.toLocaleLowerCase()===name.toLocaleLowerCase()&&(!old||n!==old.name)});if(dupe){toast('Ese tipo ya existe en la lista.');return}var payload={name:name,active:true,createdBy:AUTH.user.uid,updatedAt:Date.now()};var promise=old?DB.doc('activityTypes/'+old.id).update(payload):DB.collection('activityTypes').add(Object.assign(payload,{createdAt:Date.now()}));promise.then(function(){closeModal();toast(old?'Tipo actualizado ✓':'Tipo agregado ✓')},writeErr)};
+}
+function deleteActivityType(id){
+  var t=activityTypes.filter(function(x){return x.id===id})[0];if(!t||MODE!=='parent')return;
+  var used=assignedTasks.some(function(x){return x.type===t.name});
+  if(used){toast('No se puede eliminar: hay actividades asignadas con este tipo. Edita esas actividades primero.');return}
+  ask('Se eliminará el tipo «'+t.name+'» de la lista. Las tareas ya registradas por estudiantes conservarán su texto.','Eliminar tipo',function(){DB.doc('activityTypes/'+id).delete().then(function(){toast('Tipo eliminado')},writeErr)});
 }
 function parentAssignedTasks(){
   var list=assignedTasks.filter(function(t){return t.student===curSid}).sort(function(a,b){return (a.due||'').localeCompare(b.due||'')||({alta:0,media:1,baja:2}[a.prio]||1)-({alta:0,media:1,baja:2}[b.prio]||1)});
@@ -1209,8 +1241,8 @@ function pHome(){
     '<div class="card"><h2>'+ic('share')+'Compartir resumen</h2><p class="muted">Copia el resumen para enviarlo al docente u otro familiar.</p><button class="btn block" data-act="share">Copiar resumen</button></div>';
 }
 function pAct(){
-  if(!curSid)return noStudent();
-  var out=stChips()+parentAssignedTasks()+'<h2 style="font-size:15px;margin:4px 0 8px">Tareas registradas por el estudiante</h2>'+tasksList();
+  if(!curSid)return stChips()+parentActivityTypesCard()+noStudent();
+  var out=stChips()+parentActivityTypesCard()+parentAssignedTasks()+'<h2 style="font-size:15px;margin:4px 0 8px">Tareas registradas por el estudiante</h2>'+tasksList();
   var gs=S.grades.slice().sort(function(a,b){return a.date<b.date?-1:1}).slice(-8);
   out+='<div class="card"><h2>'+ic('grades')+'Notas recientes</h2>'+gradeList(gs,true)+'</div>';
   out+='<div class="card"><h2>'+ic('bookopen')+'Lecturas programadas</h2>';
@@ -1701,22 +1733,30 @@ function makePlan(ex){
 function formAssignedTask(){
   if(MODE!=='parent'||!curSid){toast('Selecciona primero un estudiante.');return}
   var t={title:'',subject:'',type:'Tarea',prio:'media',due:ymd(new Date()),note:''};
-  openModal('<h3>Asignar actividad a '+esc(nameOf())+'</h3><p class="muted">La actividad aparecerá en la cuenta del estudiante y se sincronizará con la familia.</p><label for="af1">Título</label><input id="af1" maxlength="120" placeholder="Ej. Entregar ejercicios de matemática"><label for="af2">Materia</label><input id="af2" maxlength="80" placeholder="Ej. Matemática"><div class="grid2" style="margin:0"><div><label for="af3">Tipo</label><select id="af3">'+['Tarea','Examen','Proyecto','Lectura','Exposición','Actividad'].map(function(x){return '<option>'+x+'</option>'}).join('')+'</select></div><div><label for="af4">Prioridad</label><select id="af4"><option value="alta">Alta</option><option value="media" selected>Media</option><option value="baja">Baja</option></select></div></div><label for="af5">Fecha de entrega</label><input type="date" id="af5" value="'+t.due+'" required><label for="af6">Instrucciones (opcional)</label><textarea id="af6" rows="3" maxlength="1000" placeholder="Qué debe completar o entregar"></textarea><div class="row" style="margin-top:16px"><button class="btn ghost" data-act="close">Cancelar</button><button class="btn famb" id="afok" style="margin-left:auto">Asignar actividad</button></div>');
-  $('#afok').onclick=function(){var title=$('#af1').value.trim(),due=$('#af5').value;if(!title){$('#af1').focus();return}if(!due){$('#af5').focus();return}if(!DB||CLOUD!=='on'){toast('Se necesita conexión con Firebase.');return}var obj={title:title,subject:$('#af2').value.trim(),subjectName:$('#af2').value.trim(),type:$('#af3').value,prio:$('#af4').value,due:due,note:$('#af6').value.trim(),student:curSid,done:false,createdBy:AUTH.user.uid,createdAt:Date.now(),updatedAt:Date.now()};DB.collection('assignedTasks').add(obj).then(function(){closeModal();toast('Actividad asignada y sincronizada ✓');},writeErr)};
+  openModal('<h3>Asignar actividad a '+esc(nameOf())+'</h3><p class="muted">La actividad aparecerá en la cuenta del estudiante y se sincronizará con la familia.</p><label for="af1">Título</label><input id="af1" maxlength="120" placeholder="Ej. Entregar ejercicios de matemática"><label for="af2">Materia</label><input id="af2" maxlength="80" placeholder="Ej. Matemática"><div class="grid2" style="margin:0"><div><label for="af3">Tipo de actividad</label><select id="af3">'+activityTypeOptions('Tarea')+'</select></div><div><label for="af4">Prioridad</label><select id="af4"><option value="alta">Alta</option><option value="media" selected>Media</option><option value="baja">Baja</option></select></div></div><label for="af5">Fecha de entrega</label><input type="date" id="af5" value="'+t.due+'" required><label for="af6">Instrucciones (opcional)</label><textarea id="af6" rows="3" maxlength="1000" placeholder="Qué debe completar o entregar"></textarea><div class="card" style="padding:12px;margin-top:12px"><div class="row between"><div><b>🔔 Recordatorios personalizados</b><div class="muted">Agrega una o varias fechas y horas anteriores a la entrega.</div></div><button type="button" class="btn ghost small" id="af-add-reminder">＋ Agregar</button></div><div id="af-reminders"></div></div><div class="row" style="margin-top:16px"><button class="btn ghost" data-act="close">Cancelar</button><button class="btn famb" id="afok" style="margin-left:auto">Asignar actividad</button></div>');
+  var reminderCount=0;
+  function addReminder(value){reminderCount++;var wrap=document.createElement('div');wrap.className='item';wrap.style.alignItems='end';wrap.innerHTML='<div class="grow"><label for="af-rem-'+reminderCount+'">Fecha y hora del recordatorio</label><input type="datetime-local" id="af-rem-'+reminderCount+'" class="af-reminder" value="'+esc(value||'')+'"></div><button type="button" class="btn ghost small" aria-label="Quitar recordatorio">Quitar</button>';wrap.querySelector('button').onclick=function(){wrap.remove()};$('#af-reminders').appendChild(wrap)}
+  $('#af-add-reminder').onclick=function(){addReminder('')};
+  $('#afok').onclick=function(){var title=$('#af1').value.trim(),due=$('#af5').value;if(!title){$('#af1').focus();return}if(!due){$('#af5').focus();return}if(!DB||CLOUD!=='on'){toast('Se necesita conexión con Firebase.');return}var dueDate=new Date(due+'T00:00:00');var reminders=[];var invalid=false;Array.prototype.forEach.call(document.querySelectorAll('.af-reminder'),function(inp){if(!inp.value)return;var at=new Date(inp.value);if(isNaN(at.getTime())){invalid=true;return}if(at<=new Date()){invalid=true;toast('Cada recordatorio debe tener una fecha y hora futura, anterior a la entrega.');return}if(at>=dueDate){invalid=true;toast('Cada recordatorio debe ser anterior a la fecha de entrega.');return}reminders.push({at:at.toISOString(),label:at.toLocaleString(LOC,{dateStyle:'medium',timeStyle:'short'}),sent:false})});if(invalid)return;reminders.sort(function(a,b){return a.at.localeCompare(b.at)});var obj={title:title,subject:$('#af2').value.trim(),subjectName:$('#af2').value.trim(),type:$('#af3').value,prio:$('#af4').value,due:due,note:$('#af6').value.trim(),reminders:reminders,student:curSid,done:false,createdBy:AUTH.user.uid,createdAt:Date.now(),updatedAt:Date.now()};DB.collection('assignedTasks').add(obj).then(function(){closeModal();toast('Actividad asignada y sincronizada ✓');},writeErr)};
 }
 function checkAssignedReminders(){
   if(MODE!=='student'||!('Notification' in window)||Notification.permission!=='granted'||!assignedTasks.length)return;
-  var todayKey=ymd(new Date()),due=assignedTasks.filter(function(t){return t.student===mySid&&!t.done&&[1,2].indexOf(diffDays(t.due))>-1});
-  due.forEach(function(t){var d=diffDays(t.due),key='sf.remind.'+t.id+'.'+d+'.'+todayKey;if(lsGet(key))return;try{var title=d===1?'Entrega mañana':'Entrega en 2 días';var body=t.title+' · '+(t.subjectName||t.subject||'Actividad')+' · '+fmtDate(t.due);if(navigator.serviceWorker&&navigator.serviceWorker.ready){navigator.serviceWorker.ready.then(function(reg){reg.showNotification(title,{body:body,icon:'./icons/icon-192.png',tag:'studyflow-'+t.id+'-'+d})}).catch(function(){new Notification(title,{body:body})})}else new Notification(title,{body:body});lsSet(key,'1')}catch(e){}}
-  );
+  var now=Date.now(),todayKey=ymd(new Date());
+  assignedTasks.filter(function(t){return t.student===mySid&&!t.done}).forEach(function(t){
+    (t.reminders||[]).forEach(function(r,i){if(!r||!r.at)return;var at=new Date(r.at).getTime();if(!isFinite(at)||at>now||now-at>24*60*60*1000)return;var key='sf.remind.custom.'+t.id+'.'+i;if(lsGet(key))return;var title='Recordatorio: '+t.title;var body=(t.subjectName||t.subject||t.type||'Actividad')+' · '+new Date(r.at).toLocaleString(LOC,{dateStyle:'medium',timeStyle:'short'})+' · Entrega: '+fmtDate(t.due);try{if(navigator.serviceWorker&&navigator.serviceWorker.ready){navigator.serviceWorker.ready.then(function(reg){reg.showNotification(title,{body:body,icon:'./icons/icon-192.png',tag:'studyflow-reminder-'+t.id+'-'+i})}).catch(function(){new Notification(title,{body:body})})}else new Notification(title,{body:body});lsSet(key,'1')}catch(e){}}
+    );
+    // Default safety reminders: 2 days and 1 day before the due date.
+    var d=diffDays(t.due);if([1,2].indexOf(d)<0)return;var key='sf.remind.default.'+t.id+'.'+d+'.'+todayKey;if(lsGet(key))return;try{var title=d===1?'Entrega mañana':'Entrega en 2 días';var body=t.title+' · '+(t.subjectName||t.subject||'Actividad')+' · '+fmtDate(t.due);if(navigator.serviceWorker&&navigator.serviceWorker.ready){navigator.serviceWorker.ready.then(function(reg){reg.showNotification(title,{body:body,icon:'./icons/icon-192.png',tag:'studyflow-'+t.id+'-'+d})}).catch(function(){new Notification(title,{body:body})})}else new Notification(title,{body:body});lsSet(key,'1')}catch(e){}
+  });
 }
+
 function formTask(id){
   if(needSubject())return;
   var t=id?S.tasks.filter(function(x){return x.id===id})[0]:{title:'',subject:S.subjects[0].id,due:ymd(new Date()),type:'Tarea',prio:'media',note:''};
-  var types=['Tarea','Examen','Proyecto','Lectura','Exposición','Repaso'];
+  var types=activityTypeNames();if(t.type&&types.indexOf(t.type)<0)types.push(t.type);
   openModal('<h3>'+(id?'Editar':'Nueva')+' actividad</h3><label for="f1">Título</label><input id="f1" value="'+esc(t.title)+'" placeholder="Ej. Ejercicios del capítulo 3">'+
    '<label for="f2">Materia</label><select id="f2">'+subjOptions(t.subject)+'</select>'+
-   '<div class="grid2" style="margin:0"><div><label for="f3">Tipo</label><select id="f3">'+types.map(function(x){return '<option value="'+x+'"'+(x===t.type?' selected':'')+'>'+x+'</option>'}).join('')+'</select></div>'+
+   '<div class="grid2" style="margin:0"><div><label for="f3">Tipo</label><select id="f3">'+types.map(function(x){return '<option value="'+esc(x)+'"'+(x===t.type?' selected':'')+'>'+esc(x)+'</option>'}).join('')+'</select></div>'+
    '<div><label for="f4">Prioridad</label><select id="f4">'+['alta','media','baja'].map(function(x){return '<option value="'+x+'"'+(x===t.prio?' selected':'')+'>'+x[0].toUpperCase()+x.slice(1)+'</option>'}).join('')+'</select></div></div>'+
    '<label for="f5">Fecha límite</label><input type="date" id="f5" value="'+t.due+'"><label for="f6">Nota (opcional)</label><textarea id="f6" rows="2">'+esc(t.note)+'</textarea>'+
    (id?'':'<label class="check" id="planRow" style="display:none;gap:10px;align-items:center;color:var(--text);font-size:14px;margin-top:14px;background:var(--primary-soft);padding:10px 12px;border-radius:11px"><input type="checkbox" id="f7" checked style="width:20px;height:20px;flex:none;accent-color:var(--primary)"><span>📅 Crear plan de repaso automático (7, 3 y 1 día antes del examen)</span></label>')+
@@ -2030,6 +2070,9 @@ document.addEventListener('click',function(e){
     case 'demo-switch':MODE=MODE==='student'?'parent':'student';view=MODE==='parent'?'p_home':'home';render();window.scrollTo(0,0);break;
     case 'new-subject':formSubject();break;
     case 'assign-task':formAssignedTask();break;
+    case 'activity-type-add':formActivityType();break;
+    case 'activity-type-edit':formActivityType(id);break;
+    case 'activity-type-delete':deleteActivityType(id);break;
     case 'enable-reminders':if(!('Notification' in window)){toast('Este navegador no admite notificaciones.');break}Notification.requestPermission().then(function(v){if(v==='granted'){toast('Recordatorios activados ✓');checkAssignedReminders()}else toast('Permite las notificaciones desde los ajustes del navegador')});break;
     case 'edit-subject':formSubject(id);break;
     case 'edit-task':formTask(id);break;
@@ -2149,7 +2192,7 @@ $('#fab').onclick=function(){if(view==='tasks')formTask();else if(view==='subjec
 render();
 initCloud();
 if('serviceWorker' in navigator)window.addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){})});
-setTimeout(checkReminders,1500);setTimeout(checkAssignedReminders,2200);setInterval(checkAssignedReminders,60*60*1000);
+setTimeout(checkReminders,1500);setTimeout(checkAssignedReminders,2200);setInterval(checkAssignedReminders,60*1000);
 })();
 </script>
 <script src="firebase-config.js"></script>

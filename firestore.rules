@@ -43,6 +43,22 @@ service cloud.firestore {
         allow write: if isMember(fid) && sid == request.auth.uid;
       }
 
+      // Tipos de actividades configurados por madre/padre para toda la familia.
+      match /activityTypes/{id} {
+        allow read: if isMember(fid);
+        allow create: if isParent(fid)
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 40
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update: if isParent(fid)
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 40
+          && request.resource.data.createdBy == request.auth.uid;
+        allow delete: if isParent(fid);
+      }
+
       // Actividades asignadas por madre/padre a un estudiante de la misma familia.
       // El estudiante solo puede cambiar el estado de su propia actividad.
       match /assignedTasks/{id} {

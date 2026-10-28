@@ -134,3 +134,12 @@ Cuando te envíe una versión nueva, en GitHub abre el repositorio → **Add fil
 **Limitación importante:** estas son notificaciones locales del navegador. No se garantiza que lleguen con la app cerrada o si el sistema operativo suspende el navegador. Para avisos push garantizados en segundo plano hace falta configurar un servidor de notificaciones push.
 
 Después de actualizar el repositorio de GitHub, publica también las nuevas reglas con `firebase deploy --only firestore:rules`. No reemplaces tu `firebase-config.js` si ya tiene los datos de tu proyecto.
+
+
+## Actualización: tipos de actividad y recordatorios múltiples
+
+- En la cuenta de madre/padre, abre **Actividad**. La tarjeta **Tipos de actividades** permite agregar, editar y eliminar tipos personalizados (por ejemplo: Laboratorio, Investigación o Guía de trabajo).
+- Los tipos personalizados se guardan en Firestore dentro de la familia y aparecen en el selector de tipos al crear tareas tanto desde el perfil familiar como desde el perfil estudiante. Se conservan los tipos predeterminados.
+- Al asignar una actividad, usa **＋ Agregar** en **Recordatorios personalizados** para agregar varias fechas y horas. Cada recordatorio debe estar en el futuro y antes del día de entrega. Las fechas se muestran en la tarjeta de actividad del estudiante y de la familia.
+- Para recibir avisos, el estudiante debe permitir notificaciones en el dispositivo. Los recordatorios personalizados se comprueban mientras la aplicación está abierta o activa; el navegador no garantiza avisos con la PWA cerrada.
+- Esta versión añade la colección `activityTypes` bajo cada documento `families/{familyId}`. Después de subir la app, publica las reglas actualizadas con `firebase deploy --only firestore:rules`. Las reglas permiten leer los tipos a miembros de la familia y solo al padre/madre crearlos, editarlos o eliminarlos.
