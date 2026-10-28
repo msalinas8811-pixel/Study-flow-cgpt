@@ -336,7 +336,7 @@ var MODE='';        // 'student' | 'parent' | ''
 var mySid=lsGet('sf.sid')||'';        // perfil de estudiante de este dispositivo
 var curSid=lsGet('sf.cur')||'';       // estudiante que ve el padre
 var DB=null,SAMPLER=null,CLOUD='pending',IMG=null;
-var students={},notes=[],rewards=[],assignedTasks=[],activityTypes=[],config=null,planDoc=null,studyPeers=[];
+var students={},notes=[],rewards=[],assignedTasks=[],activityTypes=[],config=null,planDoc=null,studyPeers=[],studyGroups=[],groupRequests=[],familyGroupApprovals=[];
 var SAMPLE=false,demo=null;
 function cacheKey(){return mySid?'sf.cache.'+mySid:LKEY}
 function loadLocal(){return normalize(lsJSON(cacheKey()))}
@@ -391,6 +391,9 @@ function r1(x){return Math.round(x*10)/10}
 function fmtScore(p){return p==null?'—':r1(toScale(p))}
 function sum(a){return a.reduce(function(x,y){return x+y},0)}
 function plural(n,a,b){return n===1?a:b}
+var STUDENT_AVATARS=['🦊','🐼','🐯','🐸','🐨','🦁','🐵','🐰','🐻','🐧','🦄','🐙','🚀','⭐','🎨','⚽'];
+function studentAvatar(){return STUDENT_AVATARS.indexOf(S.settings.avatar)>=0?S.settings.avatar:'🦊'}
+function avatarPicker(selected){return '<div class="avatar-picker" style="display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;margin:8px 0 14px">'+STUDENT_AVATARS.map(function(a){return '<button type="button" class="btn ghost small" data-avatar="'+a+'" aria-label="Avatar '+a+'" style="font-size:23px;padding:7px;border:'+(a===selected?'2px solid var(--primary)':'1px solid var(--line)')+'" '+(a===selected?'aria-pressed="true"':'')+'>'+a+'</button>'}).join('')+'</div>'}
 function nameOf(){return S.settings.name||'Estudiante'}
 
 var view=MODE==='parent'?'p_home':'home',tasksFilter='pending',gradeSubj='all',period=7;
@@ -494,6 +497,10 @@ function enterFamily(p){
   },cloudErr));
   unsubs.push(DB.collection('assignedTasks').onSnapshot(function(s){assignedTasks=s.docs.map(function(d){return Object.assign({id:d.id},d.data(),{assignedTask:true})});softRender();checkAssignedReminders()},cloudErr));
   unsubs.push(DB.collection('studyPeers').onSnapshot(function(s){studyPeers=s.docs.map(function(d){return Object.assign({id:d.id},d.data())});softRender()},cloudErr));
+  if(F().root&&AUTH.user){
+    unsubs.push(F().root.doc('users/'+AUTH.user.uid).onSnapshot(function(d){var ids=d.exists?(d.data().studyGroupIds||[]):[];studyGroups=[];ids.slice(0,30).forEach(function(gid){F().root.doc('studyGroups/'+gid).get().then(function(g){if(g.exists&& !studyGroups.some(function(x){return x.id===gid})) {studyGroups.push(Object.assign({id:gid},g.data()));softRender()}}).catch(function(){})})},cloudErr));
+  }
+  if(MODE==='parent')unsubs.push(DB.collection('groupApprovals').onSnapshot(function(s){familyGroupApprovals=s.docs.map(function(d){return Object.assign({id:d.id},d.data())});softRender()},cloudErr));
   unsubs.push(DB.collection('activityTypes').onSnapshot(function(s){activityTypes=s.docs.map(function(d){return Object.assign({id:d.id},d.data())}).filter(function(x){return x.active!==false}).sort(function(a,b){return (a.name||'').localeCompare(b.name||'')});softRender()},cloudErr));
   unsubs.push(DB.collection('notes').onSnapshot(function(s){notes=s.docs.map(function(d){return Object.assign({id:d.id},d.data())});checkRewards();softRender()},cloudErr));
   unsubs.push(DB.collection('rewards').onSnapshot(function(s){rewards=s.docs.map(function(d){return Object.assign({id:d.id},d.data())});checkRewards();softRender()},cloudErr));
@@ -781,7 +788,7 @@ function render(){
   nav.innerHTML='<div class="brand"><span class="logo">'+ic('student')+'</span><span>StudyFlow<small>'+(MODE==='parent'?'Modo familia':'Modo estudiante')+'</small></span></div>'+
     items.map(function(x){return '<button data-v="'+x[0]+'" class="'+(x[0]===view?'active':'')+'"'+(x[0]===view?' aria-current="page"':'')+'>'+ic(x[1])+'<span>'+x[2]+'</span></button>'}).join('');
   chip.hidden=false;
-  chip.innerHTML=MODE==='parent'?'<span class="av fam">'+ic('users')+'</span><span class="nm">Familia</span>'+ic('gear'):'<span class="av">'+esc((nameOf()[0]||'E').toUpperCase())+'</span><span class="nm">'+esc(nameOf())+'</span>'+ic('gear');
+  chip.innerHTML=MODE==='parent'?'<span class="av fam">'+ic('users')+'</span><span class="nm">Familia</span>'+ic('gear'):'<span class="av" style="font-size:23px">'+esc(studentAvatar())+'</span><span class="nm">'+esc(nameOf())+'</span>'+ic('gear');
   $('#hTitle').textContent=titles[view];
   $('#fab').style.display=(MODE==='student'&&(view==='tasks'||view==='subjects'||view==='grades'))?'block':'none';
   var fn={home:vHome,tasks:vTasks,subjects:vSubjects,grades:vGrades,study:vStudy,tutor:vTutor,progress:vProgress,
@@ -931,10 +938,30 @@ function openPeerInvite(){
   openModal('<h3>Invitar compañero de estudio</h3><p class="muted">Por ahora puedes invitar estudiantes vinculados a la misma familia de StudyFlow. Ambos deben aceptar para compartir el progreso.</p>'+(available.length?'<label for="peer-target">Selecciona un estudiante</label><select id="peer-target">'+available.map(function(st){return '<option value="'+esc(st.id)+'">'+esc(st.name)+'</option>'}).join('')+'</select>':'<div class="empty">No hay otros estudiantes disponibles en esta familia.</div>')+'<div class="row" style="margin-top:16px"><button class="btn ghost" data-act="close">Cancelar</button><button class="btn" id="peer-send" style="margin-left:auto" '+(!available.length?'disabled':'')+'>Enviar invitación</button></div>');
   var b=$('#peer-send');if(b)b.onclick=function(){var to=$('#peer-target').value;if(!to||to===mySid)return;var existing=studyPeers.some(function(x){return x.from===mySid&&x.to===to&&x.status==='accepted'})||studyPeers.some(function(x){return x.from===to&&x.to===mySid&&x.status==='accepted'});if(existing){toast('Ya son compañeros de estudio.');return}b.disabled=true;DB.collection('studyPeers').add({from:mySid,to:to,status:'pending',createdAt:Date.now(),fromName:nameOf()}).then(function(){closeModal();toast('Invitación enviada ✓')},function(e){b.disabled=false;writeErr(e)})};
 }
+
+function studyGroupsCard(){
+ if(!AUTH.user||!F().root)return '';
+ var out='<div class="card"><div class="row between wrap"><div><h2>🏆 Grupos de estudio</h2><div class="muted">Compite con compañeros de otras familias sin mezclar datos familiares.</div></div>';
+ if(MODE==='student')out+='<button class="btn small" data-act="group-create">＋ Crear grupo</button></div><div class="row wrap" style="margin-top:10px"><button class="btn ghost small" data-act="group-join">Unirme con código</button></div>';
+ else out+='</div>';
+ if(MODE==='parent'){
+  var pending=familyGroupApprovals.filter(function(a){return a.status==='pending'});
+  out+='<h3 style="margin-top:14px">Autorizaciones pendientes</h3>';
+  if(!pending.length)out+='<div class="empty">No hay solicitudes pendientes.</div>';
+  pending.forEach(function(a){out+='<div class="item"><div class="grow"><b>'+esc(a.studentName||'Estudiante')+'</b><div class="muted">Solicita unirse a '+esc(a.groupName||'un grupo de estudio')+'</div></div><button class="btn small" data-act="group-parent-approve" data-id="'+esc(a.id)+'">Autorizar</button><button class="btn ghost small" data-act="group-parent-reject" data-id="'+esc(a.id)+'">Rechazar</button></div>'});
+ } else {
+  if(!studyGroups.length)out+='<div class="empty" style="margin-top:12px">Todavía no perteneces a grupos. Crea uno o únete con un código.</div>';
+  studyGroups.forEach(function(g){out+='<div class="item"><span class="badge">'+esc(g.grade||'Estudio')+'</span><div class="grow"><div class="title">'+esc(g.name||'Grupo de estudio')+'</div><div class="muted">Código: <b>'+esc(g.code||'—')+'</b> · Comparte el código con tus compañeros.</div></div><button class="btn ghost small" data-act="group-copy" data-id="'+esc(g.code||'')+'">Copiar</button></div>'});
+ }
+ return out+'</div>';
+}
+function openGroupCreate(){openModal('<h3>Crear grupo de estudio</h3><label for="gc-name">Nombre del grupo</label><input id="gc-name" maxlength="60" placeholder="Ej. Séptimo grado — ciencias"><label for="gc-grade">Grado</label><input id="gc-grade" maxlength="30" placeholder="Ej. Séptimo grado"><p class="muted">Se generará un código. Cada compañero necesitará autorización de su padre o madre antes de entrar.</p><div class="row"><button class="btn ghost" data-act="close">Cancelar</button><button class="btn" id="gc-save" style="margin-left:auto">Crear grupo</button></div>');$('#gc-save').onclick=async function(){var name=$('#gc-name').value.trim(),grade=$('#gc-grade').value.trim();if(!name){$('#gc-name').focus();return}var b=this;b.disabled=true;try{var code=Array.from(crypto.getRandomValues(new Uint8Array(7))).map(function(x){return 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[x%32]}).join('');var ref=F().root.collection('studyGroups').doc();var gid=ref.id;await ref.set({name:name,grade:grade,code:code,ownerUid:AUTH.user.uid,ownerFamilyId:AUTH.prof.familyId,createdAt:Date.now(),status:'active'});await F().root.doc('studyGroupCodes/'+code).set({groupId:gid,createdAt:Date.now()});var prof=await F().root.doc('users/'+AUTH.user.uid).get(),d=prof.exists?prof.data():{};d.studyGroupIds=Array.from(new Set((d.studyGroupIds||[]).concat([gid])));await F().root.doc('users/'+AUTH.user.uid).set(d);closeModal();toast('Grupo creado. Código: '+code); }catch(e){b.disabled=false;writeErr(e)}}}
+function openGroupJoin(){openModal('<h3>Unirme a un grupo</h3><label for="gj-code">Código del grupo</label><input id="gj-code" maxlength="7" placeholder="Ej. A7K9P2Q" style="text-transform:uppercase"><p class="muted">Se enviará una solicitud. Tu padre o madre deberá autorizarla y el creador del grupo deberá aceptarte.</p><div class="row"><button class="btn ghost" data-act="close">Cancelar</button><button class="btn" id="gj-send" style="margin-left:auto">Solicitar acceso</button></div>');$('#gj-send').onclick=async function(){var code=$('#gj-code').value.trim().toUpperCase();if(!code)return;var b=this;b.disabled=true;try{var c=await F().root.doc('studyGroupCodes/'+code).get();if(!c.exists)throw new Error('No existe ese código.');var gid=c.data().groupId,g=await F().root.doc('studyGroups/'+gid).get();if(!g.exists)throw new Error('El grupo ya no está disponible.');var approvalId=gid+'_'+AUTH.user.uid;await DB.collection('groupApprovals').doc(approvalId).set({groupId:gid,groupName:g.data().name,code:code,studentUid:AUTH.user.uid,studentName:nameOf(),familyId:AUTH.prof.familyId,status:'pending',createdAt:Date.now()});await F().root.doc('studyGroups/'+gid+'/requests/'+AUTH.user.uid).set({studentUid:AUTH.user.uid,studentName:nameOf(),familyId:AUTH.prof.familyId,status:'awaiting_parent',createdAt:Date.now()});closeModal();toast('Solicitud enviada. Pide a tu padre o madre que la autorice.')}catch(e){b.disabled=false;toast(e.message||'No se pudo enviar la solicitud.')}}}
+
 function vHome(){
   var link=(!SAMPLE&&CLOUD==='on'&&!mySid)?'<div class="card fam"><h2>'+ic('users')+'Conecta con tu familia</h2><p class="muted" style="margin-top:-4px">Vincula tu perfil para que tu familia vea tu avance y te envíe mensajes y premios.</p><button class="btn famb" data-act="role-student">Vincular mi perfil</button></div>':'';
   if(!S.subjects.length){
-    return link+familyCard()+'<div class="card"><h2>¡Hola'+(S.settings.name?', '+esc(S.settings.name):'')+'! 👋</h2>'+
+    return link+familyCard()+'<div class="card"><h2>'+esc(studentAvatar())+' ¡Hola'+(S.settings.name?', '+esc(S.settings.name):'')+'! 👋</h2>'+
     '<p class="muted">Empieza agregando tus materias. Luego podrás registrar tareas, notas y horarios de lectura, y ver tu progreso.</p>'+
     '<button class="btn" data-act="new-subject">Agregar mi primera materia</button></div>';
   }
@@ -964,7 +991,7 @@ function vHome(){
   out+='</div><div class="card"><h2>'+ic('clock')+'Próximas actividades</h2>';
   if(!pend.length)out+='<div class="empty">Sin tareas pendientes 🎉</div>';
   else pend.slice(0,5).forEach(function(t){out+=taskRow(t)});
-  out+=studyPeersCard();
+  out+=studyGroupsCard();
   return out+'</div>';
 }
 function tasksList(){
@@ -1946,7 +1973,7 @@ function formSettings(){
   var s=S.settings,par=MODE==='parent';
   var out='<h3>'+(par?'Ajustes de familia':'Ajustes')+'</h3>';
   if(!par){
-    out+='<div class="grid2" style="margin:0"><div><label for="s0">Nombre</label><input id="s0" value="'+esc(s.name)+'" placeholder="Ej. Ana"></div><div><label for="s6">Grado</label><input id="s6" value="'+esc(s.grade)+'" placeholder="Ej. 7.º grado"></div>'+
+    out+='<div class="grid2" style="margin:0"><div><label for="s0">Nombre</label><input id="s0" value="'+esc(s.name)+'" placeholder="Ej. Ana"></div><div><label for="s6">Grado</label><input id="s6" value="'+esc(s.grade)+'" placeholder="Ej. 7.º grado"></div></div><label>Avatar del estudiante</label><div class="muted">Elige un avatar para identificar tu perfil en StudyFlow.</div>'+avatarPicker(studentAvatar())+'<input type="hidden" id="s-avatar" value="'+esc(studentAvatar())+'">'+ '<div class="grid2" style="margin:0">'+
      '<div><label for="s1">Meta semanal (min)</label><input type="number" id="s1" min="10" value="'+s.weekly+'"></div>'+
      '<div><label for="s2">Escala de notas (máx.)</label><input type="number" id="s2" min="1" max="1000" value="'+s.max+'"></div>'+
      '<div><label for="s3">Meta de nota (%)</label><input type="number" id="s3" min="1" max="100" value="'+s.goal+'"></div>'+
@@ -1962,9 +1989,10 @@ function formSettings(){
     '<div class="row" style="margin-top:18px"><button class="btn ghost" data-act="close" style="margin-left:auto">Cerrar</button></div>';
   openModal(out);
   if(par)return;
+  Array.prototype.forEach.call(document.querySelectorAll('[data-avatar]'),function(b){b.onclick=function(){var v=b.getAttribute('data-avatar');$('#s-avatar').value=v;Array.prototype.forEach.call(document.querySelectorAll('[data-avatar]'),function(x){x.style.border=x===b?'2px solid var(--primary)':'1px solid var(--line)';if(x===b)x.setAttribute('aria-pressed','true');else x.removeAttribute('aria-pressed')})}});
   $('#ok').onclick=function(){
     function num(id,min,max,def){var v=parseInt($('#'+id).value,10);if(isNaN(v))return def;return Math.max(min,Math.min(max,v))}
-    s.name=$('#s0').value.trim();s.grade=$('#s6').value.trim();
+    s.name=$('#s0').value.trim();s.grade=$('#s6').value.trim();s.avatar=$('#s-avatar').value||'🦊';
     s.weekly=num('s1',10,5000,s.weekly);s.max=num('s2',1,1000,s.max);s.goal=num('s3',1,100,s.goal);s.pomo=num('s4',1,120,s.pomo);s.brk=num('s5',1,60,s.brk);
     save();if(!timer.running)resetTimer();closeModal();render();toast('Ajustes guardados ✅');
   };
@@ -2204,6 +2232,11 @@ document.addEventListener('click',function(e){
     case 'ask-pro':askPro();break;
     case 'req-ok':dbUpd('notes',id,{read:true});break;
     case 'peer-invite':openPeerInvite();break;
+    case 'group-create':openGroupCreate();break;
+    case 'group-join':openGroupJoin();break;
+    case 'group-copy':copyText(id,'Código copiado');break;
+    case 'group-parent-approve':DB.doc('groupApprovals/'+id).update({status:'authorized',authorizedBy:AUTH.user.uid,authorizedAt:Date.now()}).then(function(){toast('Participación autorizada ✓')},writeErr);break;
+    case 'group-parent-reject':DB.doc('groupApprovals/'+id).update({status:'rejected',authorizedBy:AUTH.user.uid,authorizedAt:Date.now()}).then(function(){toast('Solicitud rechazada')},writeErr);break;
     case 'peer-accept':DB.doc('studyPeers/'+id).update({status:'accepted',acceptedAt:Date.now()}).then(function(){toast('Compañero agregado ✓')},writeErr);break;
     case 'peer-reject':DB.doc('studyPeers/'+id).update({status:'rejected',rejectedAt:Date.now()}).then(function(){toast('Invitación rechazada')},writeErr);break;
     case 'export':exportData();break;

@@ -31,6 +31,11 @@ if(!cfg.apiKey||/PEGA|TU_/.test(cfg.apiKey)){
     return{doc:dref,collection:cref};
   }
 
+  /* API raíz limitada por reglas Firestore para grupos entre familias */
+  function rootDoc(path){const r=doc(fs,path);return{id:r.id,path,get:async()=>wrapDoc(await getDoc(r)),set:d=>setDoc(r,d).catch(e=>{throw dbErr(e)}),update:d=>updateDoc(r,d).catch(e=>{throw dbErr(e)}),delete:()=>deleteDoc(r).catch(e=>{throw dbErr(e)}),onSnapshot:(n,e)=>onSnapshot(r,s=>n(wrapDoc(s)),err=>e&&e(dbErr(err)))}}
+  function rootCollection(path){const c=collection(fs,path);return{doc:id=>rootDoc(path+'/'+(id||doc(c).id)),add:async d=>{try{const r=await addDoc(c,d);return rootDoc(path+'/'+r.id)}catch(e){throw dbErr(e)}},onSnapshot:(n,e)=>onSnapshot(c,s=>n({docs:s.docs.map(wrapDoc),size:s.size,empty:s.empty}),err=>e&&e(dbErr(err)))}}
+  const root={doc:rootDoc,collection:rootCollection};
+
   const CH='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const newCode=()=>Array.from(crypto.getRandomValues(new Uint8Array(6))).map(b=>CH[b%CH.length]).join('');
 
@@ -113,7 +118,7 @@ if(!cfg.apiKey||/PEGA|TU_/.test(cfg.apiKey)){
     profile:async uid=>{const d=await getDoc(doc(fs,'users',uid));return d.exists()?d.data():null},
     family:async fid=>{const d=await getDoc(doc(fs,'families',fid));return d.exists()?d.data():null},
     createFamily,joinFamily,
-    db:scoped,
+    db:scoped,root,
     sampler:sampler(),
     email:()=>auth.currentUser&&auth.currentUser.email
   });

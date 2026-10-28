@@ -20,6 +20,56 @@ service cloud.firestore {
       allow list, update, delete: if false;
     }
 
+    // Códigos de grupos: consulta puntual, nunca listado público.
+    match /studyGroupCodes/{code} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn() && request.resource.data.groupId is string;
+      allow update, delete: if false;
+    }
+
+    // Grupos de estudio independientes de las familias. Solo se comparte lo publicado en el grupo.
+    match /studyGroups/{gid} {
+      function isGroupOwner() { return signedIn() && resource.data.ownerUid == request.auth.uid; }
+      function isGroupMember() { return signedIn() && exists(/databases/$(database)/documents/studyGroups/$(gid)/members/$(request.auth.uid)); }
+      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.name is string && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 60 && request.resource.data.code is string;
+      allow get: if isGroupOwner() || isGroupMember();
+      allow list: if false;
+      allow update: if isGroupOwner() && request.resource.data.ownerUid == resource.data.ownerUid;
+      allow delete: if isGroupOwner();
+
+      match /requests/{uid} {
+        function requestFamily() { return resource.data.familyId; }
+        allow create: if signedIn() && uid == request.auth.uid
+          && request.resource.data.studentUid == request.auth.uid
+          && request.resource.data.familyId is string
+          && isMember(request.resource.data.familyId)
+          && get(memberDoc(request.resource.data.familyId)).data.role == 'student'
+          && request.resource.data.status == 'awaiting_parent';
+        allow get: if signedIn() && (uid == request.auth.uid ||
+          get(/databases/$(database)/documents/studyGroups/$(gid)).data.ownerUid == request.auth.uid ||
+          (resource.data.familyId is string && isParent(resource.data.familyId)));
+        allow list: if signedIn() && get(/databases/$(database)/documents/studyGroups/$(gid)).data.ownerUid == request.auth.uid;
+        allow update: if signedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','authorizedAt','acceptedAt','rejectedAt']) && (
+          (isParent(resource.data.familyId) && request.resource.data.status in ['authorized','rejected']) ||
+          (get(/databases/$(database)/documents/studyGroups/$(gid)).data.ownerUid == request.auth.uid && resource.data.status == 'authorized' && request.resource.data.status in ['accepted','rejected'])
+        );
+        allow delete: if false;
+      }
+      match /members/{uid} {
+        allow get, list: if isGroupOwner() || isGroupMember();
+        allow create: if signedIn() && get(/databases/$(database)/documents/studyGroups/$(gid)/requests/$(uid)).data.status == 'accepted'
+          && get(/databases/$(database)/documents/studyGroups/$(gid)/requests/$(uid)).data.studentUid == uid
+          && request.resource.data.studentUid == uid
+          && request.resource.data.keys().hasOnly(['studentUid','displayName','avatar','grade','joinedAt','sharedProgress']);
+        allow update: if signedIn() && uid == request.auth.uid
+          && request.resource.data.keys().hasOnly(['studentUid','displayName','avatar','grade','joinedAt','sharedProgress']);
+        allow delete: if signedIn() && (uid == request.auth.uid || isGroupOwner());
+      }
+    }
+
     match /families/{fid} {
       allow create: if signedIn() && request.resource.data.owner == request.auth.uid;
       allow read: if isMember(fid) || (signedIn() && resource.data.owner == request.auth.uid);
@@ -80,6 +130,19 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','acceptedAt','rejectedAt'])
           && request.resource.data.status in ['accepted','rejected'];
         allow delete: if false;
+      }
+
+      // Solicitudes de grupos de estudio: cada familia autoriza únicamente a sus hijos.
+      match /groupApprovals/{approvalId} {
+        allow read: if isMember(fid) && (isParent(fid) || resource.data.studentUid == request.auth.uid);
+        allow create: if isMember(fid) && get(memberDoc(fid)).data.role == 'student'
+          && request.resource.data.studentUid == request.auth.uid
+          && request.resource.data.familyId == fid && request.resource.data.status == 'pending';
+        allow update: if isParent(fid) && resource.data.familyId == fid
+          && resource.data.status == 'pending'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','authorizedBy','authorizedAt'])
+          && request.resource.data.status in ['authorized','rejected'];
+        allow delete: if isParent(fid);
       }
 
       // Actividades asignadas por madre/padre a un estudiante de la misma familia.
