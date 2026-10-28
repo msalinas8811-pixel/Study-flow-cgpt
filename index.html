@@ -1276,9 +1276,13 @@ function tSend(text){
 }
 
 /* ===== Vistas de la familia ===== */
+function avatarOfStudent(st){
+  var a=st&&st.data&&st.data.settings&&st.data.settings.avatar;
+  return STUDENT_AVATARS.indexOf(a)>=0?a:'🦊';
+}
 function stChips(){
-  var l=stList();if(l.length<2)return '';
-  return '<div class="tabs">'+l.map(function(s){return '<button data-act="pick-st" data-id="'+s.id+'" class="'+(s.id===curSid?'active':'')+'">'+ic('student')+esc(s.name)+'</button>'}).join('')+'</div>';
+  var l=stList();if(l.length<1)return '';
+  return '<div class="tabs">'+l.map(function(s){return '<button data-act="pick-st" data-id="'+esc(s.id)+'" class="'+(s.id===curSid?'active':'')+'"><span aria-hidden="true" style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;margin-right:6px;border-radius:50%;background:var(--surface);font-size:18px;vertical-align:middle">'+esc(avatarOfStudent(s))+'</span>'+esc(s.name)+'</button>'}).join('')+'</div>';
 }
 function noStudent(){
   return '<div class="card"><h2>Aún no hay estudiantes</h2><div class="empty" style="text-align:left;padding:4px 0">'+
@@ -1286,7 +1290,7 @@ function noStudent(){
 }
 function whoCard(){
   var st=stList().filter(function(s){return s.id===curSid})[0]||{};
-  return '<div class="card"><div class="muted">Viendo a</div><div class="who"><span class="av" style="width:36px;height:36px;font-size:16px">'+esc((nameOf()[0]||'E').toUpperCase())+'</span>'+esc(nameOf())+'</div>'+
+  return '<div class="card"><div class="muted">Viendo a</div><div class="who"><span class="av" aria-label="Avatar de '+esc(nameOf())+'" style="width:44px;height:44px;font-size:26px;display:inline-flex;align-items:center;justify-content:center">'+esc(avatarOfStudent(st))+'</span>'+esc(nameOf())+'</div>'+
     '<div class="muted">'+(S.settings.grade?esc(S.settings.grade)+' · ':'')+'Última actividad: '+ago(st.updatedAt)+'</div>'+
     '<div class="row wrap" style="margin-top:12px"><button class="btn famb small" data-act="note" data-id="felicitacion">'+ic('star')+'Felicitar</button>'+
     '<button class="btn ghost small" data-act="note" data-id="recordatorio">'+ic('clock')+'Recordatorio</button><button class="btn ghost small" data-act="note" data-id="libro">'+ic('book')+'Sugerir libro</button></div></div>';
