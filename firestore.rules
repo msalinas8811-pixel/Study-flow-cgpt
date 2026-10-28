@@ -59,6 +59,29 @@ service cloud.firestore {
         allow delete: if isParent(fid);
       }
 
+      // Invitaciones de compañeros de estudio dentro de la misma familia.
+      // El alumno invitado decide aceptar o rechazar; no se permiten cambios de participantes.
+      match /studyPeers/{id} {
+        allow read: if isMember(fid) && (
+          resource.data.from == request.auth.uid || resource.data.to == request.auth.uid ||
+          (resource.data.status == 'accepted' && exists(/databases/$(database)/documents/families/$(fid)/members/$(resource.data.from)) && exists(/databases/$(database)/documents/families/$(fid)/members/$(resource.data.to)))
+        );
+        allow create: if isMember(fid)
+          && get(memberDoc(fid)).data.role == 'student'
+          && request.resource.data.from == request.auth.uid
+          && request.resource.data.to is string
+          && request.resource.data.to != request.auth.uid
+          && request.resource.data.status == 'pending'
+          && exists(/databases/$(database)/documents/families/$(fid)/members/$(request.resource.data.to))
+          && get(/databases/$(database)/documents/families/$(fid)/members/$(request.resource.data.to)).data.role == 'student';
+        allow update: if isMember(fid)
+          && resource.data.to == request.auth.uid
+          && resource.data.status == 'pending'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','acceptedAt','rejectedAt'])
+          && request.resource.data.status in ['accepted','rejected'];
+        allow delete: if false;
+      }
+
       // Actividades asignadas por madre/padre a un estudiante de la misma familia.
       // El estudiante solo puede cambiar el estado de su propia actividad.
       match /assignedTasks/{id} {

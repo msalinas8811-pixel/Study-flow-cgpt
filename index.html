@@ -336,7 +336,7 @@ var MODE='';        // 'student' | 'parent' | ''
 var mySid=lsGet('sf.sid')||'';        // perfil de estudiante de este dispositivo
 var curSid=lsGet('sf.cur')||'';       // estudiante que ve el padre
 var DB=null,SAMPLER=null,CLOUD='pending',IMG=null;
-var students={},notes=[],rewards=[],assignedTasks=[],activityTypes=[],config=null,planDoc=null;
+var students={},notes=[],rewards=[],assignedTasks=[],activityTypes=[],config=null,planDoc=null,studyPeers=[];
 var SAMPLE=false,demo=null;
 function cacheKey(){return mySid?'sf.cache.'+mySid:LKEY}
 function loadLocal(){return normalize(lsJSON(cacheKey()))}
@@ -493,6 +493,7 @@ function enterFamily(p){
     onStudentsSnap();
   },cloudErr));
   unsubs.push(DB.collection('assignedTasks').onSnapshot(function(s){assignedTasks=s.docs.map(function(d){return Object.assign({id:d.id},d.data(),{assignedTask:true})});softRender();checkAssignedReminders()},cloudErr));
+  unsubs.push(DB.collection('studyPeers').onSnapshot(function(s){studyPeers=s.docs.map(function(d){return Object.assign({id:d.id},d.data())});softRender()},cloudErr));
   unsubs.push(DB.collection('activityTypes').onSnapshot(function(s){activityTypes=s.docs.map(function(d){return Object.assign({id:d.id},d.data())}).filter(function(x){return x.active!==false}).sort(function(a,b){return (a.name||'').localeCompare(b.name||'')});softRender()},cloudErr));
   unsubs.push(DB.collection('notes').onSnapshot(function(s){notes=s.docs.map(function(d){return Object.assign({id:d.id},d.data())});checkRewards();softRender()},cloudErr));
   unsubs.push(DB.collection('rewards').onSnapshot(function(s){rewards=s.docs.map(function(d){return Object.assign({id:d.id},d.data())});checkRewards();softRender()},cloudErr));
@@ -853,7 +854,12 @@ function formActivityType(id){
   if(MODE!=='parent'||!DB||CLOUD!=='on'){toast('Solo el padre o madre puede administrar los tipos.');return}
   var old=id?activityTypes.filter(function(t){return t.id===id})[0]:null;
   var current=old?old.name:'';
-  openModal('<h3>'+(old?'Editar tipo de actividad':'Agregar tipo de actividad')+'</h3><p class="muted">El tipo estará disponible para asignar tareas y también aparecerá en los formularios de los estudiantes.</p><label for="at-name">Nombre del tipo</label><input id="at-name" maxlength="40" value="'+esc(current)+'" placeholder="Ej. Laboratorio, Investigación, Guía de trabajo"><div class="row" style="margin-top:16px"><button class="btn ghost" data-act="close">Cancelar</button><button class="btn famb" id="at-save" style="margin-left:auto">Guardar tipo</button></div>');
+  var existingNames=activityTypeNames();
+  var existingList='<div style="margin-top:18px;padding:14px;border:1px solid var(--line);border-radius:14px"><div class="row between" style="margin-bottom:8px"><strong>Tipos de actividades ya creados</strong><span class="badge">'+existingNames.length+'</span></div><div class="muted" style="font-size:13px;margin-bottom:10px">Estos tipos ya están disponibles en los formularios. Selecciona un nombre solo si necesitas revisar si existe.</div>';
+  if(!existingNames.length){existingList+='<div class="muted">Todavía no hay tipos registrados.</div>'}
+  existingNames.forEach(function(n){var custom=activityTypes.some(function(t){return (t.name||'').toLocaleLowerCase()===n.toLocaleLowerCase()});existingList+='<div class="item" style="padding:8px 0;border-bottom:1px solid var(--line)"><span class="dot" style="background:var(--primary)"></span><div class="grow">'+esc(n)+'</div><span class="badge">'+(custom?'Personalizado':'Predeterminado')+'</span></div>'});
+  existingList+='</div>';
+  openModal('<h3>'+(old?'Editar tipo de actividad':'Agregar tipo de actividad')+'</h3><p class="muted">El tipo estará disponible para asignar tareas y también aparecerá en los formularios de los estudiantes.</p><label for="at-name">Nombre del tipo</label><input id="at-name" maxlength="40" value="'+esc(current)+'" placeholder="Ej. Laboratorio, Investigación, Guía de trabajo">'+existingList+'<div class="row" style="margin-top:16px"><button class="btn ghost" data-act="close">Cancelar</button><button class="btn famb" id="at-save" style="margin-left:auto">Guardar tipo</button></div>');
   $('#at-save').onclick=function(){var name=$('#at-name').value.trim().replace(/\s+/g,' ');if(!name){$('#at-name').focus();return}if(name.length>40){toast('Máximo 40 caracteres.');return}var dupe=activityTypeNames().some(function(n){return n.toLocaleLowerCase()===name.toLocaleLowerCase()&&(!old||n.toLocaleLowerCase()!==old.name.toLocaleLowerCase())});if(dupe){toast('Ese tipo ya existe en la lista.');return}if(!AUTH.user||!AUTH.user.uid){toast('La sesión terminó. Vuelve a iniciar sesión.');return}var btn=$('#at-save');btn.disabled=true;btn.textContent='Guardando…';var payload={name:name,active:true,createdBy:AUTH.user.uid,updatedAt:Date.now()};var promise=old?DB.doc('activityTypes/'+old.id).update(payload):DB.collection('activityTypes').add(Object.assign(payload,{createdAt:Date.now()}));promise.then(function(){closeModal();toast(old?'Tipo actualizado ✓':'Tipo registrado ✓')},function(e){btn.disabled=false;btn.textContent='Guardar tipo';writeErr(e)})};
 }
 function deleteActivityType(id){
@@ -898,6 +904,33 @@ function familyCard(){
   if(ns.length)out+='<button class="btn ghost small" data-act="all-notes" style="margin-top:4px">Ver todos los mensajes ('+ns.length+')</button>';
   return out+'</div>';
 }
+function peerScore(st){
+  var d=st&&st.data||{}, grades=Array.isArray(d.grades)?d.grades:[], tasks=Array.isArray(d.tasks)?d.tasks:[], exams=tasks.filter(function(t){return /examen/i.test(t.title||t.type||'')});
+  var vals=grades.map(function(g){var n=Number(g.score!=null?g.score:g.grade);return isFinite(n)?n:null}).filter(function(n){return n!==null});
+  var avg=vals.length?vals.reduce(function(a,b){return a+b},0)/vals.length:0;
+  var total=tasks.length, done=tasks.filter(function(t){return t.done||t.doneAt}).length;
+  var ext=assignedTasks.filter(function(t){return t.student===st.id}); total+=ext.length;done+=ext.filter(function(t){return t.done}).length;
+  var taskPct=total?done/total*100:0;
+  var examAvg=exams.length?exams.reduce(function(a,t){return a+(Number(t.score)||0)},0)/exams.length:0;
+  return {points:Math.round(avg*0.5+taskPct*0.35+examAvg*0.15),avg:avg,taskPct:taskPct,total:total,done:done};
+}
+function studyPeersCard(){
+  if(MODE!=='student'||!famOn())return '';
+  var my=studyPeers.filter(function(x){return x.from===mySid||x.to===mySid});
+  var accepted=my.filter(function(x){return x.status==='accepted'}),incoming=my.filter(function(x){return x.to===mySid&&x.status==='pending'});
+  var out='<div class="card"><div class="row between wrap"><div><h2 style="margin:0">🏆 Compañeros de estudio</h2><div class="muted">Invita compañeros de tu familia y compara avances, tareas y notas.</div></div><button class="btn small" data-act="peer-invite">＋ Invitar</button></div>';
+  if(incoming.length){out+='<div class="muted" style="margin-top:12px">Invitaciones recibidas</div>';incoming.forEach(function(x){out+='<div class="item"><div class="grow"><b>'+esc((students[x.from]||{}).name||'Estudiante')+'</b><div class="muted">Quiere compartir su progreso contigo.</div></div><button class="btn small" data-act="peer-accept" data-id="'+x.id+'">Aceptar</button><button class="btn ghost small" data-act="peer-reject" data-id="'+x.id+'">Rechazar</button></div>'})}
+  var ids={};accepted.forEach(function(x){ids[x.from===mySid?x.to:x.from]=true});ids[mySid]=true;
+  var rows=Object.keys(ids).map(function(id){var st=students[id];if(!st)return null;var sc=peerScore(st);return {id:id,name:st.name,score:sc,me:id===mySid}}).filter(Boolean).sort(function(a,b){return b.score.points-a.score.points});
+  if(rows.length){out+='<div style="margin-top:12px"><div class="muted">Ranking por puntos combinados · notas 50%, tareas 35%, exámenes 15%</div>';rows.forEach(function(r,i){out+='<div class="item"><span class="badge '+(i===0?'good':'')+'">#'+(i+1)+'</span><div class="grow"><div class="title">'+esc(r.name)+(r.me?' (tú)':'')+'</div><div class="muted">Notas: '+(r.score.avg?Math.round(r.score.avg)+'%':'Sin datos')+' · Tareas: '+r.score.done+'/'+r.score.total+' completadas · '+r.score.points+' puntos</div></div></div>'});out+='</div>'}else out+='<div class="empty" style="margin-top:12px">Todavía no tienes compañeros. Envía una invitación para comenzar.</div>';
+  return out+'</div>';
+}
+function openPeerInvite(){
+  if(!DB||!AUTH.user){toast('Inicia sesión para invitar.');return}
+  var available=Object.keys(students).map(function(id){return students[id]}).filter(function(st){return st.id!==mySid&&!studyPeers.some(function(x){return x.from===mySid&&x.to===st.id&&x.status!=='rejected'})});
+  openModal('<h3>Invitar compañero de estudio</h3><p class="muted">Por ahora puedes invitar estudiantes vinculados a la misma familia de StudyFlow. Ambos deben aceptar para compartir el progreso.</p>'+(available.length?'<label for="peer-target">Selecciona un estudiante</label><select id="peer-target">'+available.map(function(st){return '<option value="'+esc(st.id)+'">'+esc(st.name)+'</option>'}).join('')+'</select>':'<div class="empty">No hay otros estudiantes disponibles en esta familia.</div>')+'<div class="row" style="margin-top:16px"><button class="btn ghost" data-act="close">Cancelar</button><button class="btn" id="peer-send" style="margin-left:auto" '+(!available.length?'disabled':'')+'>Enviar invitación</button></div>');
+  var b=$('#peer-send');if(b)b.onclick=function(){var to=$('#peer-target').value;if(!to||to===mySid)return;var existing=studyPeers.some(function(x){return x.from===mySid&&x.to===to&&x.status==='accepted'})||studyPeers.some(function(x){return x.from===to&&x.to===mySid&&x.status==='accepted'});if(existing){toast('Ya son compañeros de estudio.');return}b.disabled=true;DB.collection('studyPeers').add({from:mySid,to:to,status:'pending',createdAt:Date.now(),fromName:nameOf()}).then(function(){closeModal();toast('Invitación enviada ✓')},function(e){b.disabled=false;writeErr(e)})};
+}
 function vHome(){
   var link=(!SAMPLE&&CLOUD==='on'&&!mySid)?'<div class="card fam"><h2>'+ic('users')+'Conecta con tu familia</h2><p class="muted" style="margin-top:-4px">Vincula tu perfil para que tu familia vea tu avance y te envíe mensajes y premios.</p><button class="btn famb" data-act="role-student">Vincular mi perfil</button></div>':'';
   if(!S.subjects.length){
@@ -931,6 +964,7 @@ function vHome(){
   out+='</div><div class="card"><h2>'+ic('clock')+'Próximas actividades</h2>';
   if(!pend.length)out+='<div class="empty">Sin tareas pendientes 🎉</div>';
   else pend.slice(0,5).forEach(function(t){out+=taskRow(t)});
+  out+=studyPeersCard();
   return out+'</div>';
 }
 function tasksList(){
@@ -2169,6 +2203,9 @@ document.addEventListener('click',function(e){
     case 'pro-cancel':ask('Volverás al plan Gratis. La IA tendrá los límites gratuitos.','Cancelar Pro',function(){setPlan({plan:'free',since:Date.now()}).then(function(ok){if(ok)toast('Ahora estás en el plan Gratis')})});break;
     case 'ask-pro':askPro();break;
     case 'req-ok':dbUpd('notes',id,{read:true});break;
+    case 'peer-invite':openPeerInvite();break;
+    case 'peer-accept':DB.doc('studyPeers/'+id).update({status:'accepted',acceptedAt:Date.now()}).then(function(){toast('Compañero agregado ✓')},writeErr);break;
+    case 'peer-reject':DB.doc('studyPeers/'+id).update({status:'rejected',rejectedAt:Date.now()}).then(function(){toast('Invitación rechazada')},writeErr);break;
     case 'export':exportData();break;
     case 'import':importData();break;
   }
